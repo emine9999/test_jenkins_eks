@@ -1,40 +1,29 @@
 pipeline {
     agent any
+
     environment {
         AWS_DEFAULT_REGION = 'us-east-1'
     }
+
     stages {
-        stage('Checkout SCM') {
+        stage('Verify AWS Credentials') {
             steps {
-                checkout scm
-            }
-        }
+                script {
+                    // Verify AWS credentials are set
+                    if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+                        error("AWS credentials are not set in the environment.")
+                    } else {
+                        echo "AWS_ACCESS_KEY_ID: ${env.AWS_ACCESS_KEY_ID}"
+                        echo "AWS_SECRET_ACCESS_KEY: ${env.AWS_SECRET_ACCESS_KEY}"
 
-        stage('Configure and Verify AWS CLI') {
-            steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
-                    script {
-                        // Ensure we are using bash
-                        sh '''
-                        #!/bin/bash
-                        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-not set}"
-                        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-not set}"
-
-                        # Check if the credentials are set
-                        if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
-                            echo "ERROR: AWS credentials are not set."
-                            exit 1
-                        fi
-
-                        # Configure AWS CLI
-                        aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
-                        aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
-                        aws configure set default.region "$AWS_DEFAULT_REGION"
-                        aws configure list
-
-                        # Verify AWS CLI configuration
-                        aws sts get-caller-identity
-                        '''
+                        // Verify AWS CLI configuration
+                        try {
+                            // Check if the AWS CLI is working and the credentials are valid
+                            def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
+                            echo "AWS CLI is configured correctly. Output: ${output}"
+                        } catch (Exception e) {
+                            error("Failed to verify AWS CLI: ${e.message}")
+                        }
                     }
                 }
             }
