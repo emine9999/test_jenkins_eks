@@ -91,7 +91,7 @@ EOF
                             echo "Attempt ${attempt} to get Load Balancer DNS name..."
                             lbDnsName = sh(script: """
                                 aws elbv2 describe-load-balancers --region ${REGION} | \
-                                jq -r '.LoadBalancers[] | select(.LoadBalancerName | contains("${NAMESPACE}")) | .DNSName'
+                                grep -A 5 ${NAMESPACE} | grep DNSName | awk -F'"' '{print \$4}'
                             """, returnStdout: true).trim()
                             if (lbDnsName == "") {
                                 sleep(10)
