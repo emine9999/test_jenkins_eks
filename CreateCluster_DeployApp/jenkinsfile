@@ -8,13 +8,16 @@ pipeline {
         }
         stage('Install AWS CLI') {
             steps {
-                sh '''
-                apt-get update && \
-                apt-get install -y unzip && \
-                curl "https://d1wnz8y8yif8k1.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-                unzip awscliv2.zip && \
-                sudo ./aws/install
-                '''
+                script {
+                    // Switch to root user to run apt-get commands
+                    sh '''
+                    sudo apt-get update && \
+                    sudo apt-get install -y unzip curl && \
+                    curl "https://d1wnz8y8yif8k1.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+                    unzip awscliv2.zip && \
+                    sudo ./aws/install
+                    '''
+                }
             }
         }
         stage('Verify AWS CLI Installation') {
