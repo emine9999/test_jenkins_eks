@@ -74,24 +74,34 @@ EOF
             }
         }
         
-        stage('Get Application URL') {
+        stage('Reveal APP URL') {
             steps {
-                script {
-                    // Wait for the LoadBalancer to get an external IP
-                    sh """
-                    external_ip=""
-                    while [ -z \$external_ip ]; do
-                      echo "Waiting for end point..."
-                      external_ip=\$(kubectl get svc ${SERVICE_NAME} --namespace=${NAMESPACE} --template="{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}")
-                      [ -z "\$external_ip" ] && sleep 10
-                    done
-                    echo "End point ready: \$external_ip"
-                    """
-                    
-                    // Get the LoadBalancer URL
-                    def loadBalancerUrl = sh(script: "kubectl get svc ${SERVICE_NAME} --namespace=${NAMESPACE} --template=\"{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}\"", returnStdout: true).trim()
-                    
-                    echo "Application is accessible at: http://${loadBalancerUrl}"
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    script {
+                        // Wait for the LoadBalancer to be created and get its DNS name
+                        def lbDnsName = ""
+                        def maxAttempts = 30
+                        def attempt = 1
+                        while (lbDnsName == "" && attempt <= maxAttempts) {
+                            echo "Attempt ${attempt} to get Load Balancer DNS name..."
+                            lbDnsName = sh(script: "aws elb describe-load-balancers --region ${REGION} | grep DNSName | cut -d'\"' -f4 | grep ${NAMESPACE}", returnStdout: true).trim()
+                            if (lbDnsName == "") {
+                                sleep(10)
+                                attempt++
+                            }
+                        }
+                        
+                        if (lbDnsName != "") {
+                            echo "Application is accessible at: http://${lbDnsName}"
+                        } else {
+                            error "Failed to retrieve Load Balancer DNS name after ${maxAttempts} attempts"
+                        }
+                    }
                 }
             }
         }
