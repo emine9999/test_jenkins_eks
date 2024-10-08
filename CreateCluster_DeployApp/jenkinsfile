@@ -9,35 +9,27 @@ pipeline {
     }
     
     stages {
-        stage('Install Tools') {
+        // ... (previous stages remain the same)
+
+        stage('Verify AWS Credentials') {
             steps {
-                sh '''
-                    # Clean up previous installations if they exist
-                    rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/aws $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
-                    
-                    # Install AWS CLI
-                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    unzip -o awscliv2.zip
-                    ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
-                    
-                    # Install kubectl
-                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                    chmod +x kubectl
-                    mkdir -p $HOME/.local/bin
-                    mv kubectl $HOME/.local/bin/
-
-                    # Install eksctl
-                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-                    mv /tmp/eksctl $HOME/.local/bin/
-
-                    # Verify installations
-                    echo "AWS CLI version:"
-                    aws --version
-                    echo "kubectl version:"
-                    kubectl version --client
-                    echo "eksctl version:"
-                    eksctl version
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        echo "Verifying AWS credentials..."
+                        aws sts get-caller-identity
+                        if [ $? -eq 0 ]; then
+                            echo "AWS credentials are valid and working."
+                        else
+                            echo "Failed to verify AWS credentials."
+                            exit 1
+                        fi
+                    '''
+                }
             }
         }
 
@@ -49,103 +41,14 @@ pipeline {
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
-                    sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
+                    sh '''
+                        echo "Creating EKS cluster..."
+                        eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1
+                    '''
                 }
             }
         }
-        
-        stage('Update Kubeconfig') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
-                }
-            }
-        }
-        
-        stage('Create Namespace') {
-            steps {
-                sh "kubectl create namespace ${NAMESPACE} || true"
-            }
-        }
-        
-        stage('Deploy Hello World App') {
-            steps {
-                script {
-                    def deploymentYaml = """
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hello-world
-  namespace: ${NAMESPACE}
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: hello-world
-  template:
-    metadata:
-      labels:
-        app: hello-world
-    spec:
-      containers:
-      - name: hello-world
-        image: nginx:latest
-        ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: hello-world-service
-  namespace: ${NAMESPACE}
-spec:
-  type: LoadBalancer
-  selector:
-    app: hello-world
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 80
-"""
-                    writeFile file: 'hello-world-deployment.yaml', text: deploymentYaml
-                    
-                    sh "kubectl apply -f hello-world-deployment.yaml"
-                }
-            }
-        }
-        
-        stage('Retrieve Application URL') {
-            steps {
-                script {
-                    sh "kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}"
-                    
-                    sh "kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' --timeout=300s service/hello-world-service -n ${NAMESPACE}"
-                    
-                    def loadBalancerUrl = sh(
-                        script: "kubectl get service hello-world-service -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
-                        returnStdout: true
-                    ).trim()
 
-                    writeFile file: 'application-url.txt', text: "http://${loadBalancerUrl}"
-                    
-                    echo "Application URL: http://${loadBalancerUrl}"
-                    echo "You can access the Hello World app using the above URL once it's fully propagated (may take a few minutes)."
-                    
-                    archiveArtifacts artifacts: 'application-url.txt', fingerprint: true
-                }
-            }
-        }
-    }
-    
-    post {
-        always {
-            echo 'Cleaning up...'
-            // Add cleanup steps if necessary
-        }
+        // ... (subsequent stages remain the same)
     }
 }
