@@ -21,7 +21,6 @@ pipeline {
                     else
                         echo "AWS CLI not found in $AWS_CLI_DIR"
                     fi
-
                     # Install kubectl if not present
                     if ! command -v kubectl &> /dev/null; then
                         echo "Installing kubectl..."
@@ -32,8 +31,7 @@ pipeline {
                         echo "kubectl is already installed."
                     fi
                     echo "kubectl version:"
-                    kubectl version --client --short || echo "Failed to retrieve kubectl version."
-
+                    kubectl version --client || echo "Failed to retrieve kubectl version."
                     # Install eksctl if not present
                     if ! command -v eksctl &> /dev/null; then
                         echo "Installing eksctl..."
@@ -44,10 +42,8 @@ pipeline {
                     fi
                     echo "eksctl version:"
                     eksctl version || echo "Failed to retrieve eksctl version."
-
                     # Print PATH for debugging
                     echo "Current PATH: $PATH"
-
                     # Verify tools in PATH
                     echo "Verifying installed tools in PATH..."
                     echo "AWS CLI: $(command -v aws || echo 'Not found')"
@@ -59,38 +55,63 @@ pipeline {
         
         stage('Create EKS Cluster') {
             steps {
-                sh '''
-                    echo "Creating EKS cluster..."
-                    eksctl create cluster \
-                      --name $CLUSTER_NAME \
-                      --region $REGION \
-                      --nodegroup-name eks-node-group \
-                      --nodes 2 \
-                      --node-type t2.micro \
-                      --with-oidc \
-                      --ssh-access \
-                      --ssh-public-key my-key-pair \
-                      --managed
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        echo "Creating EKS cluster..."
+                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                        eksctl create cluster \
+                          --name $CLUSTER_NAME \
+                          --region $REGION \
+                          --nodegroup-name eks-node-group \
+                          --nodes 2 \
+                          --node-type t3.small \
+                          --with-oidc \
+                          --managed
+                    '''
+                }
             }
         }
         
         stage('Verify EKS Cluster') {
             steps {
-                sh '''
-                    echo "Verifying EKS cluster..."
-                    aws eks --region $REGION update-kubeconfig --name $CLUSTER_NAME
-                    kubectl get svc
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        echo "Verifying EKS cluster..."
+                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                        aws eks --region $REGION update-kubeconfig --name $CLUSTER_NAME
+                        kubectl get svc
+                    '''
+                }
             }
         }
         
         stage('Delete EKS Cluster') {
             steps {
-                sh '''
-                    echo "Deleting EKS cluster..."
-                    eksctl delete cluster --name $CLUSTER_NAME --region $REGION
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        echo "Deleting EKS cluster..."
+                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                        eksctl delete cluster --name $CLUSTER_NAME --region $REGION
+                    '''
+                }
             }
         }
     }
