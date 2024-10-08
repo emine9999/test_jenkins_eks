@@ -10,90 +10,73 @@ pipeline {
     }
     
     stages {
-        stage('Check Cluster') {
+        stage('Configure kubectl') {
             steps {
-                script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: "awscredss",
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        def clusterExists = sh(script: "eksctl get cluster --name ${CLUSTER_NAME} --region ${REGION}", returnStatus: true) == 0
-                        if (!clusterExists) {
-                            echo "Cluster does not exist. Creating new cluster..."
-                            sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
-                        } else {
-                            echo "Cluster already exists. Updating kubeconfig..."
-                            sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
-                        }
-                    }
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
                 }
             }
         }
         
-        stage('Check Namespace') {
-            steps {
-                script {
-                    def namespaceExists = sh(script: "kubectl get namespace ${NAMESPACE}", returnStatus: true) == 0
-                    if (!namespaceExists) {
-                        echo "Namespace does not exist. Creating new namespace..."
-                        sh "kubectl create namespace ${NAMESPACE}"
-                    } else {
-                        echo "Namespace already exists."
-                    }
-                }
-            }
-        }
-        
-        stage('Deploy or Update App') {
+        stage('Deploy App') {
             steps {
                 script {
                     // Create or update deployment
                     sh """
                     cat <<EOF | kubectl apply -f -
-                    apiVersion: apps/v1
-                    kind: Deployment
-                    metadata:
-                      name: ${APP_NAME}
-                      namespace: ${NAMESPACE}
-                    spec:
-                      replicas: 1
-                      selector:
-                        matchLabels:
-                          app: ${APP_NAME}
-                      template:
-                        metadata:
-                          labels:
-                            app: ${APP_NAME}
-                        spec:
-                          containers:
-                          - name: ${APP_NAME}
-                            image: nginx:latest
-                            ports:
-                            - containerPort: 80
-                    EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${APP_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${APP_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${APP_NAME}
+    spec:
+      containers:
+      - name: ${APP_NAME}
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+EOF
                     """
                     
                     // Create or update service
                     sh """
                     cat <<EOF | kubectl apply -f -
-                    apiVersion: v1
-                    kind: Service
-                    metadata:
-                      name: ${SERVICE_NAME}
-                      namespace: ${NAMESPACE}
-                    spec:
-                      selector:
-                        app: ${APP_NAME}
-                      ports:
-                        - protocol: TCP
-                          port: 80
-                          targetPort: 80
-                      type: LoadBalancer
-                    EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SERVICE_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: ${APP_NAME}
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: LoadBalancer
+EOF
                     """
-                    
+                }
+            }
+        }
+        
+        stage('Get Application URL') {
+            steps {
+                script {
                     // Wait for the LoadBalancer to get an external IP
                     sh """
                     external_ip=""
@@ -109,7 +92,13 @@ pipeline {
                     def loadBalancerUrl = sh(script: "kubectl get svc ${SERVICE_NAME} --namespace=${NAMESPACE} --template=\"{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}\"", returnStdout: true).trim()
                     
                     echo "Application is accessible at: http://${loadBalancerUrl}"
-                    
+                }
+            }
+        }
+        
+        stage('Customize App') {
+            steps {
+                script {
                     // Modify the default nginx page
                     sh """
                     kubectl exec -it -n ${NAMESPACE} \$(kubectl get pod -n ${NAMESPACE} -l app=${APP_NAME} -o jsonpath="{.items[0].metadata.name}") -- /bin/sh -c "echo '<h1>Hello Amine Elhasbi</h1>' > /usr/share/nginx/html/index.html"
@@ -120,11 +109,11 @@ pipeline {
     }
     
     post {
-        failure {
-            echo "Pipeline failed. Please check the logs for details."
-        }
         success {
-            echo "Pipeline completed successfully. Your application is now deployed/updated."
+            echo "Application deployed successfully. Check the console output for the URL."
+        }
+        failure {
+            echo "Deployment failed. Please check the logs for details."
         }
     }
 }
