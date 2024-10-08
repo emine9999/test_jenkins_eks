@@ -89,7 +89,10 @@ EOF
                         def attempt = 1
                         while (lbDnsName == "" && attempt <= maxAttempts) {
                             echo "Attempt ${attempt} to get Load Balancer DNS name..."
-                            lbDnsName = sh(script: "aws elb describe-load-balancers --region ${REGION} | grep DNSName | cut -d'\"' -f4 | grep ${NAMESPACE}", returnStdout: true).trim()
+                            lbDnsName = sh(script: """
+                                aws elbv2 describe-load-balancers --region ${REGION} | \
+                                jq -r '.LoadBalancers[] | select(.LoadBalancerName | contains("${NAMESPACE}")) | .DNSName'
+                            """, returnStdout: true).trim()
                             if (lbDnsName == "") {
                                 sleep(10)
                                 attempt++
