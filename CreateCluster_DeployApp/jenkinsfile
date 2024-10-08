@@ -37,16 +37,24 @@ pipeline {
             curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
             mv /tmp/eksctl $HOME/.local/bin/
 
+            # Debugging: List contents of .local/bin
+            echo "Contents of $HOME/.local/bin:"
+            ls -l $HOME/.local/bin
+
             # Verify installations
             echo "AWS CLI version:"
-            aws --version
+            $HOME/.local/bin/aws --version || echo "AWS CLI not found in $HOME/.local/bin"
             echo "kubectl version:"
-            kubectl version --client
+            $HOME/.local/bin/kubectl version --client || echo "kubectl not found in $HOME/.local/bin"
             echo "eksctl version:"
-            eksctl version
+            $HOME/.local/bin/eksctl version || echo "eksctl not found in $HOME/.local/bin"
 
             # Print PATH for debugging
             echo "Current PATH: $PATH"
+
+            # Try to find aws executable
+            which aws || echo "aws not found in PATH"
+            find $HOME -name aws -type f 2>/dev/null || echo "aws executable not found in $HOME"
         '''
     }
 }
