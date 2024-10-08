@@ -1,23 +1,61 @@
 pipeline {
     agent any
-
     stages {
-        stage('Check Environment Variables') {
+        stage('Create Cluster') {
             steps {
-                script {
-                    echo "AWS_ACCESS_KEY_ID: ${env.AWS_ACCESS_KEY_ID}"
-                    echo "AWS_SECRET_ACCESS_KEY: ${env.AWS_SECRET_ACCESS_KEY}"
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "eksctl create cluster --name python-cluster --region eu-central-1 --nodes-min=3"
                 }
             }
         }
-        stage('Verify AWS CLI') {
+        stage('Update Kubeconfig') {
             steps {
-                script {
-                    // Attempt to get caller identity
-                    def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
-                    echo "AWS CLI Output: ${output}"
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                    aws eks update-kubeconfig --name python-cluster
+                    """
                 }
             }
+        }
+        stage('Create Namespace') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "kubectl create namespace python-app"
+                }
+            }
+        }
+        stage('Delete Cluster') {
+            steps {
+                input message: 'Do you want to delete the EKS cluster?', ok: 'Yes'
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "eksctl delete cluster --name python-cluster --region eu-central-1"
+                }
+            }
+        }
+    }
+    post {
+        always {
+            cleanWs()
         }
     }
 }
