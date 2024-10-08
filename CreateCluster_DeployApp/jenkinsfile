@@ -2,14 +2,14 @@ pipeline {
     agent any
     
     environment {
-        CLUSTER_NAME = 'python-cluster'
-        REGION = 'us-east-1'
-        NAMESPACE = 'hello-app'
-        PATH = "$HOME/.local/bin:$PATH"
-    }
+    CLUSTER_NAME = 'python-cluster'
+    REGION = 'us-east-1'
+    NAMESPACE = 'hello-app'
+    PATH = "$HOME/.local/bin:$PATH"
+}
     
     stages {
-        stage('Install Tools') {
+       stage('Install Tools') {
     steps {
         sh '''
             # Clean up previous installations if they exist
@@ -24,6 +24,9 @@ pipeline {
                 ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
             fi
             
+            # Modify PATH to include new installations
+            export PATH="$HOME/.local/bin:$PATH"
+            
             # Install kubectl
             curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
             chmod +x kubectl
@@ -36,11 +39,14 @@ pipeline {
 
             # Verify installations
             echo "AWS CLI version:"
-            $HOME/.local/bin/aws --version
+            aws --version
             echo "kubectl version:"
-            $HOME/.local/bin/kubectl version --client
+            kubectl version --client
             echo "eksctl version:"
-            $HOME/.local/bin/eksctl version
+            eksctl version
+
+            # Print PATH for debugging
+            echo "Current PATH: $PATH"
         '''
     }
 }
