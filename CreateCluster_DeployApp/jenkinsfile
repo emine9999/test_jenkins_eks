@@ -1,10 +1,23 @@
 pipeline {
-    agent any 
-
+    agent any
     stages {
+        stage('Check PATH') {
+            steps {
+                sh 'echo $PATH'
+            }
+        }
+        stage('Verify AWS CLI Installation') {
+            steps {
+                sh 'aws --version'
+            }
+        }
+        stage('Install AWS CLI') {
+            steps {
+                sh 'apt-get update && apt-get install -y awscli'
+            }
+        }
         stage('Print Environment Variables') {
             steps {
-                // Print all environment variables
                 sh 'env'
             }
         }
