@@ -1,96 +1,12 @@
 pipeline {
     agent any
-    
-    environment {
-        CLUSTER_NAME = "amine-cluster"
-        REGION = "us-east-1"
-    }
-    
+
     stages {
-        stage('Create Cluster') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
-                }
-            }
-        }
-        
-        stage('Update Kubeconfig') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    script {
-                        def maxAttempts = 8
-                        def attempt = 1
-                        def success = false
-                        
-                        while (!success && attempt <= maxAttempts) {
-                            try {
-                                sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
-                                success = true
-                            } catch (Exception e) {
-                                echo "Attempt ${attempt} failed: ${e.getMessage()}"
-                                if (attempt == maxAttempts) {
-                                    error "Failed to update kubeconfig after ${maxAttempts} attempts"
-                                }
-                                sleep(time: 30, unit: 'SECONDS')
-                                attempt++
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Create Namespace') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "kubectl create namespace python-app"
-                }
-            }
-        }
-        
-        stage('Deploy App') {
+        stage('Verify AWS CLI') {
             steps {
                 script {
-                    build job: 'DEPLOY_APP',
-                    parameters: [
-                        [$class: 'StringParameterValue', name: 'DEPLOYMENT']    
-                    ]
-                } 
-            } 
-        }
-    }
-    
-    post {
-        always {
-            echo "Cleaning up workspace"
-            deleteDir()
-        }
-        failure {
-            script {
-                echo "Pipeline failed. Attempting to delete the cluster."
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "eksctl delete cluster --name ${CLUSTER_NAME} --region ${REGION}"
+                    def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
+                    echo "AWS CLI Output: ${output}"
                 }
             }
         }
