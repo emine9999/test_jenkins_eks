@@ -6,14 +6,20 @@ pipeline {
                 sh 'echo $PATH'
             }
         }
+        stage('Install AWS CLI') {
+            steps {
+                sh '''
+                apt-get update && \
+                apt-get install -y unzip && \
+                curl "https://d1wnz8y8yif8k1.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+                unzip awscliv2.zip && \
+                sudo ./aws/install
+                '''
+            }
+        }
         stage('Verify AWS CLI Installation') {
             steps {
                 sh 'aws --version'
-            }
-        }
-        stage('Install AWS CLI') {
-            steps {
-                sh 'apt-get update && apt-get install -y awscli'
             }
         }
         stage('Print Environment Variables') {
