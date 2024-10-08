@@ -4,143 +4,127 @@ pipeline {
     environment {
         CLUSTER_NAME = "amine-cluster"
         REGION = "us-east-1"
+        NAMESPACE = "python-app"
+        APP_NAME = "hello-app"
+        SERVICE_NAME = "hello-app-service"
     }
     
     stages {
-        stage('Create Cluster') {
+        stage('Check Cluster') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
-                }
-            }
-        }
-        
-        stage('Update Kubeconfig') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    script {
-                        def maxAttempts = 8
-                        def attempt = 1
-                        def success = false
-                        
-                        while (!success && attempt <= maxAttempts) {
-                            try {
-                                sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
-                                success = true
-                            } catch (Exception e) {
-                                echo "Attempt ${attempt} failed: ${e.getMessage()}"
-                                if (attempt == maxAttempts) {
-                                    error "Failed to update kubeconfig after ${maxAttempts} attempts"
-                                }
-                                sleep(time: 30, unit: 'SECONDS')
-                                attempt++
-                            }
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: "awscredss",
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        def clusterExists = sh(script: "eksctl get cluster --name ${CLUSTER_NAME} --region ${REGION}", returnStatus: true) == 0
+                        if (!clusterExists) {
+                            echo "Cluster does not exist. Creating new cluster..."
+                            sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
+                        } else {
+                            echo "Cluster already exists. Updating kubeconfig..."
+                            sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
                         }
                     }
                 }
             }
         }
         
-        stage('Create Namespace') {
+        stage('Check Namespace') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "kubectl create namespace python-app"
+                script {
+                    def namespaceExists = sh(script: "kubectl get namespace ${NAMESPACE}", returnStatus: true) == 0
+                    if (!namespaceExists) {
+                        echo "Namespace does not exist. Creating new namespace..."
+                        sh "kubectl create namespace ${NAMESPACE}"
+                    } else {
+                        echo "Namespace already exists."
+                    }
                 }
             }
         }
         
-        stage('Deploy Simple App') {
+        stage('Deploy or Update App') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    script {
-                        // Create a deployment
-                        sh '''
-                        cat <<EOF | kubectl apply -f -
-                        apiVersion: apps/v1
-                        kind: Deployment
+                script {
+                    // Create or update deployment
+                    sh """
+                    cat <<EOF | kubectl apply -f -
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: ${APP_NAME}
+                      namespace: ${NAMESPACE}
+                    spec:
+                      replicas: 1
+                      selector:
+                        matchLabels:
+                          app: ${APP_NAME}
+                      template:
                         metadata:
-                          name: hello-app
-                          namespace: python-app
+                          labels:
+                            app: ${APP_NAME}
                         spec:
-                          replicas: 1
-                          selector:
-                            matchLabels:
-                              app: hello-app
-                          template:
-                            metadata:
-                              labels:
-                                app: hello-app
-                            spec:
-                              containers:
-                              - name: hello-app
-                                image: nginx:latest
-                                ports:
-                                - containerPort: 80
-                        EOF
-                        '''
-                        
-                        // Create a service
-                        sh '''
-                        cat <<EOF | kubectl apply -f -
-                        apiVersion: v1
-                        kind: Service
-                        metadata:
-                          name: hello-app-service
-                          namespace: python-app
-                        spec:
-                          selector:
-                            app: hello-app
-                          ports:
-                            - protocol: TCP
-                              port: 80
-                              targetPort: 80
-                          type: LoadBalancer
-                        EOF
-                        '''
-                        
-                        // Wait for the LoadBalancer to get an external IP
-                        sh '''
-                        external_ip=""
-                        while [ -z $external_ip ]; do
-                          echo "Waiting for end point..."
-                          external_ip=$(kubectl get svc hello-app-service --namespace=python-app --template="{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}")
-                          [ -z "$external_ip" ] && sleep 10
-                        done
-                        echo "End point ready: $external_ip"
-                        '''
-                        
-                        // Get the LoadBalancer URL
-                        def loadBalancerUrl = sh(script: "kubectl get svc hello-app-service --namespace=python-app --template=\"{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}\"", returnStdout: true).trim()
-                        
-                        echo "Application is accessible at: http://${loadBalancerUrl}"
-                        
-                        // Modify the default nginx page
-                        sh """
-                        kubectl exec -it -n python-app \$(kubectl get pod -n python-app -l app=hello-app -o jsonpath="{.items[0].metadata.name}") -- /bin/sh -c "echo '<h1>Hello Amine Elhasbi</h1>' > /usr/share/nginx/html/index.html"
-                        """
-                    }
+                          containers:
+                          - name: ${APP_NAME}
+                            image: nginx:latest
+                            ports:
+                            - containerPort: 80
+                    EOF
+                    """
+                    
+                    // Create or update service
+                    sh """
+                    cat <<EOF | kubectl apply -f -
+                    apiVersion: v1
+                    kind: Service
+                    metadata:
+                      name: ${SERVICE_NAME}
+                      namespace: ${NAMESPACE}
+                    spec:
+                      selector:
+                        app: ${APP_NAME}
+                      ports:
+                        - protocol: TCP
+                          port: 80
+                          targetPort: 80
+                      type: LoadBalancer
+                    EOF
+                    """
+                    
+                    // Wait for the LoadBalancer to get an external IP
+                    sh """
+                    external_ip=""
+                    while [ -z \$external_ip ]; do
+                      echo "Waiting for end point..."
+                      external_ip=\$(kubectl get svc ${SERVICE_NAME} --namespace=${NAMESPACE} --template="{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}")
+                      [ -z "\$external_ip" ] && sleep 10
+                    done
+                    echo "End point ready: \$external_ip"
+                    """
+                    
+                    // Get the LoadBalancer URL
+                    def loadBalancerUrl = sh(script: "kubectl get svc ${SERVICE_NAME} --namespace=${NAMESPACE} --template=\"{{range .status.loadBalancer.ingress}}{{.hostname}}{{end}}\"", returnStdout: true).trim()
+                    
+                    echo "Application is accessible at: http://${loadBalancerUrl}"
+                    
+                    // Modify the default nginx page
+                    sh """
+                    kubectl exec -it -n ${NAMESPACE} \$(kubectl get pod -n ${NAMESPACE} -l app=${APP_NAME} -o jsonpath="{.items[0].metadata.name}") -- /bin/sh -c "echo '<h1>Hello Amine Elhasbi</h1>' > /usr/share/nginx/html/index.html"
+                    """
                 }
             }
+        }
+    }
+    
+    post {
+        failure {
+            echo "Pipeline failed. Please check the logs for details."
+        }
+        success {
+            echo "Pipeline completed successfully. Your application is now deployed/updated."
         }
     }
 }
