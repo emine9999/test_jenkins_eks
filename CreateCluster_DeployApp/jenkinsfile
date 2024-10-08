@@ -8,6 +8,31 @@ pipeline {
     }
     
     stages {
+        stage('Install Tools') {
+            steps {
+                sh '''
+                    # Install AWS CLI
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip awscliv2.zip
+                    sudo ./aws/install
+
+                    # Install kubectl
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    sudo mv kubectl /usr/local/bin/
+
+                    # Install eksctl
+                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+                    sudo mv /tmp/eksctl /usr/local/bin
+
+                    # Verify installations
+                    aws --version
+                    kubectl version --client
+                    eksctl version
+                '''
+            }
+        }
+
         stage('Create Cluster') {
             steps {
                 withCredentials([[
@@ -72,22 +97,18 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     script {
-                        // Wait for the LoadBalancer to get an external IP
                         sh "kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}"
                         
-                        // Get the LoadBalancer URL
                         def loadBalancerUrl = sh(
                             script: "kubectl get service hello-world -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
                             returnStdout: true
                         ).trim()
 
-                        // Save the URL to a file
                         writeFile file: 'application-url.txt', text: "http://${loadBalancerUrl}"
                         
                         echo "Application URL: http://${loadBalancerUrl}"
                         echo "You can access the Hello World app using the above URL once it's fully propagated (may take a few minutes)."
                         
-                        // Archive the URL file
                         archiveArtifacts artifacts: 'application-url.txt', fingerprint: true
                     }
                 }
