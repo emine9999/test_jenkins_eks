@@ -1,38 +1,15 @@
 pipeline {
     agent any
-
     stages {
-        stage('Verify Tools Installation') {
+        stage('Install AWS CLI') {
             steps {
-                script {
-                    def awsCli = sh(script: 'aws --version', returnStatus: true)
-                    def eksctl = sh(script: 'eksctl version', returnStatus: true)
-                    def kubectl = sh(script: 'kubectl version --client', returnStatus: true)
-
-                    if (awsCli == 0) {
-                        echo 'AWS CLI is installed.'
-                    } else {
-                        echo 'AWS CLI is not installed.'
-                    }
-
-                    if (eksctl == 0) {
-                        echo 'eksctl is installed.'
-                    } else {
-                        echo 'eksctl is not installed.'
-                    }
-
-                    if (kubectl == 0) {
-                        echo 'kubectl is installed.'
-                    } else {
-                        echo 'kubectl is not installed.'
-                    }
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'your-credentials-id']]) {
+                    sh '''
+                    # Your commands here
+                    aws configure list
+                    '''
                 }
             }
-        }
-    }
-    post {
-        always {
-            echo 'Verification completed.'
         }
     }
 }
