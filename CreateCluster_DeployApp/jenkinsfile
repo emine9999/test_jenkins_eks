@@ -2,62 +2,58 @@ pipeline {
     agent any
     
     environment {
-    CLUSTER_NAME = 'python-cluster'
-    REGION = 'us-east-1'
-    NAMESPACE = 'hello-app'
-    PATH = "$HOME/.local/bin:$PATH"
-}
+        CLUSTER_NAME = 'python-cluster'
+        REGION = 'us-east-1'
+        NAMESPACE = 'hello-app'
+        PATH = "$HOME/.local/bin:$PATH"
+    }
     
     stages {
-       stage('Install Tools') {
-    steps {
-        sh '''
-            # Clean up previous installations if they exist
-            rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
+        stage('Install Tools') {
+            steps {
+                sh '''
+                    # Clean up previous installations if they exist
+                    rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
 
-            # Install or update AWS CLI
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip -o awscliv2.zip
-            if [ -d "$HOME/.local/aws-cli" ]; then
-                ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin --update
-            else
-                ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
-            fi
-            
-            # Modify PATH to include new installations
-            export PATH="$HOME/.local/bin:$PATH"
-            
-            # Install kubectl
-            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-            chmod +x kubectl
-            mkdir -p $HOME/.local/bin
-            mv kubectl $HOME/.local/bin/
+                    # Install or update AWS CLI
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip -o awscliv2.zip
+                    ./aws/install --bin-dir $HOME/.local/bin --install-dir $HOME/.local/aws-cli --update
 
-            # Install eksctl
-            curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-            mv /tmp/eksctl $HOME/.local/bin/
+                    # Modify PATH to include new installations
+                    export PATH="$HOME/.local/bin:$PATH"
+                    
+                    # Install kubectl
+                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    mkdir -p $HOME/.local/bin
+                    mv kubectl $HOME/.local/bin/
 
-            # Debugging: List contents of .local/bin
-            echo "Contents of $HOME/.local/bin:"
-            ls -l $HOME/.local/bin
+                    # Install eksctl
+                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+                    mv /tmp/eksctl $HOME/.local/bin/
 
-            # Verify installations
-            echo "AWS CLI version:"
-            $HOME/.local/bin/aws --version || echo "AWS CLI not found in $HOME/.local/bin"
-            echo "kubectl version:"
-            $HOME/.local/bin/kubectl version --client || echo "kubectl not found in $HOME/.local/bin"
-            echo "eksctl version:"
-            $HOME/.local/bin/eksctl version || echo "eksctl not found in $HOME/.local/bin"
+                    # Debugging: List contents of .local/bin
+                    echo "Contents of $HOME/.local/bin:"
+                    ls -l $HOME/.local/bin
 
-            # Print PATH for debugging
-            echo "Current PATH: $PATH"
+                    # Verify installations
+                    echo "AWS CLI version:"
+                    $HOME/.local/bin/aws --version || echo "AWS CLI not found in $HOME/.local/bin"
+                    echo "kubectl version:"
+                    $HOME/.local/bin/kubectl version --client
+                    echo "eksctl version:"
+                    $HOME/.local/bin/eksctl version
 
-            # Try to find aws executable
-            which aws || echo "aws not found in PATH"
-            find $HOME -name aws -type f 2>/dev/null || echo "aws executable not found in $HOME"
-        '''
-    }
-}
+                    # Print PATH for debugging
+                    echo "Current PATH: $PATH"
+
+                    # Try to find aws executable
+                    which aws || echo "aws not found in PATH"
+                    find $HOME -name aws -type f 2>/dev/null
+                '''
+            }
+        }
 
         stage('Verify AWS Credentials') {
             steps {
@@ -71,7 +67,7 @@ pipeline {
                         echo "Verifying AWS credentials..."
                         echo "AWS_ACCESS_KEY_ID is set: ${AWS_ACCESS_KEY_ID:+true}"
                         echo "AWS_SECRET_ACCESS_KEY is set: ${AWS_SECRET_ACCESS_KEY:+true}"
-                        aws sts get-caller-identity
+                        $HOME/.local/bin/aws sts get-caller-identity
                         if [ $? -eq 0 ]; then
                             echo "AWS credentials are valid and working."
                         else
@@ -92,7 +88,7 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                        eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1
+                        $HOME/.local/bin/eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1
                     '''
                 }
             }
@@ -107,7 +103,7 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                        aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}
+                        $HOME/.local/bin/aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}
                     '''
                 }
             }
@@ -155,8 +151,8 @@ spec:
                     writeFile file: 'hello-world-deployment.yaml', text: deploymentYaml
                     
                     sh '''
-                        kubectl create namespace ${NAMESPACE} || true
-                        kubectl apply -f hello-world-deployment.yaml
+                        $HOME/.local/bin/kubectl create namespace ${NAMESPACE} || true
+                        $HOME/.local/bin/kubectl apply -f hello-world-deployment.yaml
                     '''
                 }
             }
@@ -166,12 +162,12 @@ spec:
             steps {
                 script {
                     sh '''
-                        kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}
-                        kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' --timeout=300s service/hello-world-service -n ${NAMESPACE}
+                        $HOME/.local/bin/kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}
+                        $HOME/.local/bin/kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' --timeout=300s service/hello-world-service -n ${NAMESPACE}
                     '''
                     
                     def loadBalancerUrl = sh(
-                        script: "kubectl get service hello-world-service -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                        script: "$HOME/.local/bin/kubectl get service hello-world-service -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
                         returnStdout: true
                     ).trim()
 
