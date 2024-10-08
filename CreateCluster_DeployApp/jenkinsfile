@@ -10,36 +10,40 @@ pipeline {
     
     stages {
         stage('Install Tools') {
-            steps {
-                sh '''
-                    # Clean up previous installations if they exist
-                    rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/aws $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
-                    
-                    # Install AWS CLI
-                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    unzip -o awscliv2.zip
-                    ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
-                    
-                    # Install kubectl
-                    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-                    chmod +x kubectl
-                    mkdir -p $HOME/.local/bin
-                    mv kubectl $HOME/.local/bin/
+    steps {
+        sh '''
+            # Clean up previous installations if they exist
+            rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
 
-                    # Install eksctl
-                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-                    mv /tmp/eksctl $HOME/.local/bin/
+            # Install or update AWS CLI
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -o awscliv2.zip
+            if [ -d "$HOME/.local/aws-cli" ]; then
+                ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin --update
+            else
+                ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
+            fi
+            
+            # Install kubectl
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            mkdir -p $HOME/.local/bin
+            mv kubectl $HOME/.local/bin/
 
-                    # Verify installations
-                    echo "AWS CLI version:"
-                    $HOME/.local/bin/aws --version
-                    echo "kubectl version:"
-                    $HOME/.local/bin/kubectl version --client
-                    echo "eksctl version:"
-                    $HOME/.local/bin/eksctl version
-                '''
-            }
-        }
+            # Install eksctl
+            curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+            mv /tmp/eksctl $HOME/.local/bin/
+
+            # Verify installations
+            echo "AWS CLI version:"
+            $HOME/.local/bin/aws --version
+            echo "kubectl version:"
+            $HOME/.local/bin/kubectl version --client
+            echo "eksctl version:"
+            $HOME/.local/bin/eksctl version
+        '''
+    }
+}
 
         stage('Verify AWS Credentials') {
             steps {
