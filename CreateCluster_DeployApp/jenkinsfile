@@ -12,9 +12,12 @@ pipeline {
         stage('Install Tools') {
             steps {
                 sh '''
+                    # Clean up previous installations if they exist
+                    rm -rf awscliv2.zip aws kubectl eksctl $HOME/.local/bin/aws $HOME/.local/bin/kubectl $HOME/.local/bin/eksctl
+                    
                     # Install AWS CLI
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    unzip awscliv2.zip
+                    unzip -o awscliv2.zip
                     ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
                     
                     # Install kubectl
@@ -29,11 +32,11 @@ pipeline {
 
                     # Verify installations
                     echo "AWS CLI version:"
-                    aws --version
+                    $HOME/.local/bin/aws --version
                     echo "kubectl version:"
-                    kubectl version --client
+                    $HOME/.local/bin/kubectl version --client
                     echo "eksctl version:"
-                    eksctl version
+                    $HOME/.local/bin/eksctl version
                 '''
             }
         }
