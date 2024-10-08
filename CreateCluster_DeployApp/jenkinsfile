@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Verify AWS Credentials') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss']]) {
                     script {
                         def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
                         echo "AWS CLI is configured correctly. Output: ${output}"
