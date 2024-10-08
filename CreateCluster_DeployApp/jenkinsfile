@@ -1,89 +1,83 @@
 pipeline {
     agent any
-
+    
     environment {
-        AWS_REGION = 'us-west-2'  // Change this to your preferred region
-        CLUSTER_NAME = 'minimal-eks-cluster'
-        NODE_INSTANCE_TYPE = 't3.small'
-        NODE_COUNT = '1'
+        CLUSTER_NAME = 'python-cluster'
+        REGION = 'us-east-1'
+        NAMESPACE = 'hello-app'
     }
-
+    
     stages {
-        stage('Set up AWS CLI') {
+        stage('Create Cluster') {
             steps {
-                script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'awscredss',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh 'aws --version'
-                        sh 'aws sts get-caller-identity'
-                    }
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=1"
                 }
             }
         }
-
-        stage('Create Minimal EKS Cluster') {
+        
+        stage('Update Kubeconfig') {
             steps {
-                script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'awscredss',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        sh """
-                        eksctl create cluster \\
-                        --name ${CLUSTER_NAME} \\
-                        --region ${AWS_REGION} \\
-                        --nodes ${NODE_COUNT} \\
-                        --node-type ${NODE_INSTANCE_TYPE} \\
-                        --managed
-                        """
-                    }
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
                 }
             }
         }
-
-        stage('Deploy Hello World App') {
+        
+        stage('Create Namespace') {
             steps {
-                script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'awscredss',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
-                        // Update kubeconfig
-                        sh "aws eks --region ${AWS_REGION} update-kubeconfig --name ${CLUSTER_NAME}"
-                        
-                        // Create a simple Hello World deployment
-                        sh """
-                        kubectl create deployment hello-world --image=nginx
-                        kubectl expose deployment hello-world --type=LoadBalancer --port=80
-                        """
-                    }
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh "kubectl create namespace ${NAMESPACE}"
                 }
             }
         }
-
+        
+        stage('Deploy App') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh """
+                    kubectl create deployment hello-world --image=nginx -n ${NAMESPACE}
+                    kubectl expose deployment hello-world --type=LoadBalancer --port=80 -n ${NAMESPACE}
+                    """
+                }
+            }
+        }
+        
         stage('Retrieve Application URL') {
             steps {
-                script {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'awscredss',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                    ]]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    script {
                         // Wait for the LoadBalancer to get an external IP
-                        sh 'kubectl wait --for=condition=available --timeout=300s deployment/hello-world'
+                        sh "kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}"
                         
                         // Get the LoadBalancer URL
                         def loadBalancerUrl = sh(
-                            script: "kubectl get service hello-world -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                            script: "kubectl get service hello-world -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
                             returnStdout: true
                         ).trim()
 
@@ -98,13 +92,6 @@ pipeline {
                     }
                 }
             }
-        }
-    }
-
-    post {
-        always {
-            echo 'Cleaning up...'
-            // Add cleanup steps if necessary
         }
     }
 }
