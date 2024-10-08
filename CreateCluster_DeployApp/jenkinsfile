@@ -4,19 +4,28 @@ pipeline {
         AWS_DEFAULT_REGION = 'us-east-1'
     }
     stages {
+        stage('Checkout SCM') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Configure and Verify AWS CLI') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
                     script {
-                        // Adding script block for better handling
+                        // Using bash for better compatibility
                         sh '''
-                        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID ?: 'not set'}"
-                        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY ?: 'not set'}"
+                        #!/bin/bash
+
+                        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-'not set'}"
+                        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-'not set'}"
 
                         # Check if the credentials are set
                         if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
                             echo "ERROR: AWS credentials are not set."
-                            exit 1
+                            currentBuild.result = 'FAILURE'
+                            error("AWS credentials are not set.")
                         fi
 
                         # Configure AWS CLI
