@@ -5,6 +5,7 @@ pipeline {
         CLUSTER_NAME = 'python-cluster'
         REGION = 'us-east-1'
         NAMESPACE = 'hello-app'
+        PATH = "$HOME/.local/bin:$PATH"
     }
     
     stages {
@@ -14,16 +15,16 @@ pipeline {
                     # Install AWS CLI
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                     unzip awscliv2.zip
-                    sudo ./aws/install
-
+                    ./aws/install -i $HOME/.local/aws-cli -b $HOME/.local/bin
+                    
                     # Install kubectl
                     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
                     chmod +x kubectl
-                    sudo mv kubectl /usr/local/bin/
+                    mkdir -p $HOME/.local/bin
+                    mv kubectl $HOME/.local/bin/
 
                     # Install eksctl
-                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-                    sudo mv /tmp/eksctl /usr/local/bin
+                    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C $HOME/.local/bin
 
                     # Verify installations
                     aws --version
@@ -61,58 +62,89 @@ pipeline {
         
         stage('Create Namespace') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh "kubectl create namespace ${NAMESPACE}"
-                }
+                sh "kubectl create namespace ${NAMESPACE}"
             }
         }
         
-        stage('Deploy App') {
+        stage('Deploy Hello World App') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    sh """
-                    kubectl create deployment hello-world --image=nginx -n ${NAMESPACE}
-                    kubectl expose deployment hello-world --type=LoadBalancer --port=80 -n ${NAMESPACE}
-                    """
+                script {
+                    // Create deployment YAML
+                    def deploymentYaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+      - name: hello-world
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world-service
+  namespace: ${NAMESPACE}
+spec:
+  type: LoadBalancer
+  selector:
+    app: hello-world
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+"""
+                    writeFile file: 'hello-world-deployment.yaml', text: deploymentYaml
+                    
+                    // Apply the deployment
+                    sh "kubectl apply -f hello-world-deployment.yaml"
                 }
             }
         }
         
         stage('Retrieve Application URL') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-                ]]) {
-                    script {
-                        sh "kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}"
-                        
-                        def loadBalancerUrl = sh(
-                            script: "kubectl get service hello-world -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
-                            returnStdout: true
-                        ).trim()
+                script {
+                    // Wait for the deployment to be available
+                    sh "kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n ${NAMESPACE}"
+                    
+                    // Wait for the LoadBalancer to get an external IP
+                    sh "kubectl wait --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' --timeout=300s service/hello-world-service -n ${NAMESPACE}"
+                    
+                    // Get the LoadBalancer URL
+                    def loadBalancerUrl = sh(
+                        script: "kubectl get service hello-world-service -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                        returnStdout: true
+                    ).trim()
 
-                        writeFile file: 'application-url.txt', text: "http://${loadBalancerUrl}"
-                        
-                        echo "Application URL: http://${loadBalancerUrl}"
-                        echo "You can access the Hello World app using the above URL once it's fully propagated (may take a few minutes)."
-                        
-                        archiveArtifacts artifacts: 'application-url.txt', fingerprint: true
-                    }
+                    writeFile file: 'application-url.txt', text: "http://${loadBalancerUrl}"
+                    
+                    echo "Application URL: http://${loadBalancerUrl}"
+                    echo "You can access the Hello World app using the above URL once it's fully propagated (may take a few minutes)."
+                    
+                    archiveArtifacts artifacts: 'application-url.txt', fingerprint: true
                 }
             }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up...'
+            // You might want to add cleanup steps here, like deleting the EKS cluster
+            // Be cautious with cleanup in production environments
         }
     }
 }
