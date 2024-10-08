@@ -1,37 +1,61 @@
 pipeline {
     agent any
+    
+    environment {
+        CLUSTER_NAME = "python-cluster"
+        REGION = "eu-central-1"
+    }
+    
     stages {
         stage('Create Cluster') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
+                    credentialsId: "aws-credentials",
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
-                    sh "eksctl create cluster --name python-cluster --region eu-central-1 --nodes-min=3"
+                    sh "eksctl create cluster --name ${CLUSTER_NAME} --region ${REGION} --nodes-min=3"
                 }
             }
         }
+        
         stage('Update Kubeconfig') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
+                    credentialsId: "aws-credentials",
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
-                    sh """
-                    aws eks update-kubeconfig --name python-cluster
-                    """
+                    script {
+                        def maxAttempts = 5
+                        def attempt = 1
+                        def success = false
+                        
+                        while (!success && attempt <= maxAttempts) {
+                            try {
+                                sh "aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${REGION}"
+                                success = true
+                            } catch (Exception e) {
+                                echo "Attempt ${attempt} failed: ${e.getMessage()}"
+                                if (attempt == maxAttempts) {
+                                    error "Failed to update kubeconfig after ${maxAttempts} attempts"
+                                }
+                                sleep(time: 30, unit: 'SECONDS')
+                                attempt++
+                            }
+                        }
+                    }
                 }
             }
         }
+        
         stage('Create Namespace') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
+                    credentialsId: "aws-credentials",
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
@@ -39,23 +63,36 @@ pipeline {
                 }
             }
         }
-        stage('Delete Cluster') {
+        
+        stage('Deploy App') {
             steps {
-                input message: 'Do you want to delete the EKS cluster?', ok: 'Yes'
+                script {
+                    build job: 'DEPLOY_APP',
+                    parameters: [
+                        [$class: 'StringParameterValue', name: 'DEPLOYMENT']    
+                    ]
+                } 
+            } 
+        }
+    }
+    
+    post {
+        always {
+            echo "Cleaning up workspace"
+            deleteDir()
+        }
+        failure {
+            script {
+                echo "Pipeline failed. Attempting to delete the cluster."
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: "awscredss",
+                    credentialsId: "aws-credentials",
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
-                    sh "eksctl delete cluster --name python-cluster --region eu-central-1"
+                    sh "eksctl delete cluster --name ${CLUSTER_NAME} --region ${REGION}"
                 }
             }
-        }
-    }
-    post {
-        always {
-            cleanWs()
         }
     }
 }
