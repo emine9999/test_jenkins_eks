@@ -1,0 +1,110 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'us-west-2'  // Change this to your preferred region
+        CLUSTER_NAME = 'minimal-eks-cluster'
+        NODE_INSTANCE_TYPE = 't3.small'
+        NODE_COUNT = '1'
+    }
+
+    stages {
+        stage('Set up AWS CLI') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'awscredss',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh 'aws --version'
+                        sh 'aws sts get-caller-identity'
+                    }
+                }
+            }
+        }
+
+        stage('Create Minimal EKS Cluster') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'awscredss',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                        eksctl create cluster \\
+                        --name ${CLUSTER_NAME} \\
+                        --region ${AWS_REGION} \\
+                        --nodes ${NODE_COUNT} \\
+                        --node-type ${NODE_INSTANCE_TYPE} \\
+                        --managed
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Hello World App') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'awscredss',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        // Update kubeconfig
+                        sh "aws eks --region ${AWS_REGION} update-kubeconfig --name ${CLUSTER_NAME}"
+                        
+                        // Create a simple Hello World deployment
+                        sh """
+                        kubectl create deployment hello-world --image=nginx
+                        kubectl expose deployment hello-world --type=LoadBalancer --port=80
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Retrieve Application URL') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'awscredss',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        // Wait for the LoadBalancer to get an external IP
+                        sh 'kubectl wait --for=condition=available --timeout=300s deployment/hello-world'
+                        
+                        // Get the LoadBalancer URL
+                        def loadBalancerUrl = sh(
+                            script: "kubectl get service hello-world -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                            returnStdout: true
+                        ).trim()
+
+                        // Save the URL to a file
+                        writeFile file: 'application-url.txt', text: "http://${loadBalancerUrl}"
+                        
+                        echo "Application URL: http://${loadBalancerUrl}"
+                        echo "You can access the Hello World app using the above URL once it's fully propagated (may take a few minutes)."
+                        
+                        // Archive the URL file
+                        archiveArtifacts artifacts: 'application-url.txt', fingerprint: true
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning up...'
+            // Add cleanup steps if necessary
+        }
+    }
+}
