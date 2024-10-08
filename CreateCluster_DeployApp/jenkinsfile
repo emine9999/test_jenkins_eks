@@ -2,12 +2,13 @@ pipeline {
     agent any
 
     stages {
-        stage('Verify AWS CLI') {
+        stage('Verify AWS Credentials') {
             steps {
-                script {
-                    // Set the shell explicitly to bash
-                    def output = sh(script: 'bash -c "aws sts get-caller-identity"', returnStdout: true).trim()
-                    echo "AWS CLI Output: ${output}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials']]) {
+                    script {
+                        def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
+                        echo "AWS CLI is configured correctly. Output: ${output}"
+                    }
                 }
             }
         }
