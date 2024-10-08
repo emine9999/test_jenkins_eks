@@ -14,18 +14,16 @@ pipeline {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
                     script {
-                        // Using bash for better compatibility
+                        // Ensure we are using bash
                         sh '''
                         #!/bin/bash
-
                         echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-'not set'}"
                         echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-'not set'}"
 
                         # Check if the credentials are set
                         if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
                             echo "ERROR: AWS credentials are not set."
-                            currentBuild.result = 'FAILURE'
-                            error("AWS credentials are not set.")
+                            exit 1
                         fi
 
                         # Configure AWS CLI
