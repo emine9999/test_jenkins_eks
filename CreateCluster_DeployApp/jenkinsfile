@@ -9,13 +9,14 @@ pipeline {
         stage('Install AWS CLI') {
             steps {
                 script {
-                    // Switch to root user to run apt-get commands
+                    // Run as root directly
                     sh '''
-                    sudo apt-get update && \
-                    sudo apt-get install -y unzip curl && \
+                    apt-get update && \
+                    apt-get install -y unzip curl && \
                     curl "https://d1wnz8y8yif8k1.cloudfront.net/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
                     unzip awscliv2.zip && \
-                    sudo ./aws/install
+                    ./aws/install && \
+                    rm -rf awscliv2.zip aws/
                     '''
                 }
             }
