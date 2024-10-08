@@ -2,13 +2,20 @@ pipeline {
     agent any
 
     stages {
-        stage('Verify AWS Credentials') {
+        stage('Check Environment Variables') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss']]) {
-                    script {
-                        def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
-                        echo "AWS CLI is configured correctly. Output: ${output}"
-                    }
+                script {
+                    echo "AWS_ACCESS_KEY_ID: ${env.AWS_ACCESS_KEY_ID}"
+                    echo "AWS_SECRET_ACCESS_KEY: ${env.AWS_SECRET_ACCESS_KEY}"
+                }
+            }
+        }
+        stage('Verify AWS CLI') {
+            steps {
+                script {
+                    // Attempt to get caller identity
+                    def output = sh(script: 'aws sts get-caller-identity', returnStdout: true).trim()
+                    echo "AWS CLI Output: ${output}"
                 }
             }
         }
