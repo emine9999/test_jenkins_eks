@@ -5,46 +5,41 @@ pipeline {
         CLUSTER_NAME = 'python-cluster'
         REGION = 'us-east-1'
         NAMESPACE = 'hello-app'
-        PATH = "/var/jenkins_home/.local/bin:$PATH"
-        AWS_CLI_DIR = "/var/jenkins_home/.local/aws-cli/v2/current/bin"
+        PATH = "/var/jenkins_home/.local/bin:/var/jenkins_home/.local/aws-cli/v2/current/bin:$PATH"
     }
     
     stages {
         stage('Verify Tools') {
             steps {
                 sh '''
-                    # Verify AWS CLI
                     echo "Verifying AWS CLI..."
                     if command -v aws &> /dev/null; then
                         echo "AWS CLI version:"
-                        $AWS_CLI_DIR/aws --version
+                        aws --version
                     else
-                        echo "AWS CLI not found in $AWS_CLI_DIR"
+                        echo "AWS CLI not found"
                     fi
-                    # Install kubectl if not present
+
+                    echo "Verifying kubectl..."
                     if ! command -v kubectl &> /dev/null; then
                         echo "Installing kubectl..."
                         curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
                         chmod +x kubectl
                         mv kubectl /var/jenkins_home/.local/bin/
-                    else
-                        echo "kubectl is already installed."
                     fi
                     echo "kubectl version:"
-                    kubectl version --client || echo "Failed to retrieve kubectl version."
-                    # Install eksctl if not present
+                    kubectl version --client
+
+                    echo "Verifying eksctl..."
                     if ! command -v eksctl &> /dev/null; then
                         echo "Installing eksctl..."
                         curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
                         mv /tmp/eksctl /var/jenkins_home/.local/bin/
-                    else
-                        echo "eksctl is already installed."
                     fi
                     echo "eksctl version:"
-                    eksctl version || echo "Failed to retrieve eksctl version."
-                    # Print PATH for debugging
+                    eksctl version
+
                     echo "Current PATH: $PATH"
-                    # Verify tools in PATH
                     echo "Verifying installed tools in PATH..."
                     echo "AWS CLI: $(command -v aws || echo 'Not found')"
                     echo "kubectl: $(command -v kubectl || echo 'Not found')"
@@ -62,9 +57,12 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
+                        echo "Verifying AWS credentials..."
+                        echo "AWS_ACCESS_KEY_ID is set: ${AWS_ACCESS_KEY_ID:+true}"
+                        echo "AWS_SECRET_ACCESS_KEY is set: ${AWS_SECRET_ACCESS_KEY:+true}"
+                        aws sts get-caller-identity
+
                         echo "Creating EKS cluster..."
-                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                         eksctl create cluster \
                           --name $CLUSTER_NAME \
                           --region $REGION \
@@ -72,7 +70,9 @@ pipeline {
                           --nodes 2 \
                           --node-type t3.small \
                           --with-oidc \
-                          --managed
+                          --managed \
+                          --aws-access-key-id $AWS_ACCESS_KEY_ID \
+                          --aws-secret-access-key $AWS_SECRET_ACCESS_KEY
                     '''
                 }
             }
@@ -88,16 +88,15 @@ pipeline {
                 ]]) {
                     sh '''
                         echo "Verifying EKS cluster..."
-                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
                         aws eks --region $REGION update-kubeconfig --name $CLUSTER_NAME
+                        kubectl get nodes
                         kubectl get svc
                     '''
                 }
             }
         }
         
-        stage('Delete EKS Cluster') {
+        stage('Deploy Application') {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -106,10 +105,64 @@ pipeline {
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     sh '''
-                        echo "Deleting EKS cluster..."
-                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-                        eksctl delete cluster --name $CLUSTER_NAME --region $REGION
+                        echo "Deploying application..."
+                        kubectl create namespace $NAMESPACE || true
+                        kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-world
+  namespace: $NAMESPACE
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hello-world
+  template:
+    metadata:
+      labels:
+        app: hello-world
+    spec:
+      containers:
+      - name: hello-world
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world-service
+  namespace: $NAMESPACE
+spec:
+  type: LoadBalancer
+  selector:
+    app: hello-world
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+EOF
+                        kubectl get pods -n $NAMESPACE
+                        kubectl get svc -n $NAMESPACE
+                    '''
+                }
+            }
+        }
+        
+        stage('Retrieve Application URL') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: "awscredss",
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    sh '''
+                        echo "Retrieving application URL..."
+                        kubectl wait --for=condition=available --timeout=300s deployment/hello-world -n $NAMESPACE
+                        LOAD_BALANCER_IP=$(kubectl get svc hello-world-service -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                        echo "Application is accessible at: http://$LOAD_BALANCER_IP"
                     '''
                 }
             }
@@ -119,7 +172,17 @@ pipeline {
     post {
         always {
             echo 'Cleaning up...'
-            // Add cleanup steps if necessary
+            withCredentials([[
+                $class: 'AmazonWebServicesCredentialsBinding',
+                credentialsId: "awscredss",
+                accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+            ]]) {
+                sh '''
+                    echo "Deleting EKS cluster..."
+                    eksctl delete cluster --name $CLUSTER_NAME --region $REGION
+                '''
+            }
         }
     }
 }
