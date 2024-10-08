@@ -5,10 +5,12 @@ pipeline {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscredss']]) {
                     script {
+                        // Output the environment variables for debugging
+                        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}"
+                        echo "AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}"
+
                         // Set AWS environment variables
-                        env.AWS_ACCESS_KEY_ID = "${AWS_ACCESS_KEY_ID}"
-                        env.AWS_SECRET_ACCESS_KEY = "${AWS_SECRET_ACCESS_KEY}"
-                        env.AWS_DEFAULT_REGION = "us-east-1" // Set your region if necessary
+                        env.AWS_REGION = "us-east-1" // Set your region if necessary
                     }
                     sh '''
                     aws configure list
