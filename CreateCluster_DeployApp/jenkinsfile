@@ -56,6 +56,43 @@ pipeline {
                 '''
             }
         }
+        
+        stage('Create EKS Cluster') {
+            steps {
+                sh '''
+                    echo "Creating EKS cluster..."
+                    eksctl create cluster \
+                      --name $CLUSTER_NAME \
+                      --region $REGION \
+                      --nodegroup-name eks-node-group \
+                      --nodes 2 \
+                      --node-type t2.micro \
+                      --with-oidc \
+                      --ssh-access \
+                      --ssh-public-key my-key-pair \
+                      --managed
+                '''
+            }
+        }
+        
+        stage('Verify EKS Cluster') {
+            steps {
+                sh '''
+                    echo "Verifying EKS cluster..."
+                    aws eks --region $REGION update-kubeconfig --name $CLUSTER_NAME
+                    kubectl get svc
+                '''
+            }
+        }
+        
+        stage('Delete EKS Cluster') {
+            steps {
+                sh '''
+                    echo "Deleting EKS cluster..."
+                    eksctl delete cluster --name $CLUSTER_NAME --region $REGION
+                '''
+            }
+        }
     }
     
     post {
